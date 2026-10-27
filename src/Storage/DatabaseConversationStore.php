@@ -30,6 +30,7 @@ use Laravel\Ai\Responses\Data\Step;
 use Laravel\Ai\Responses\Data\TextUsage;
 use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\ToolResult;
+use Laravel\Ai\Responses\StreamedAgentResponse;
 use Throwable;
 
 class DatabaseConversationStore implements ConversationStore, PaginatesConversations, ResolvesPendingApprovals, VerifiesConversationOwnership
@@ -220,13 +221,12 @@ class DatabaseConversationStore implements ConversationStore, PaginatesConversat
             $steps = $this->withoutReplayBlocks($steps);
         }
 
-        $content = $steps
-            ->pluck('content')
-            ->filter(fn ($text): bool => trim((string) $text) !== '')
-            ->join("\n\n");
+        $content = $response instanceof StreamedAgentResponse
+            ? $steps->pluck('content')->filter(fn (string $text): bool => trim($text) !== '')->join("\n\n")
+            : $response->text;
 
-        if ($content === '') {
-            $content = blank($response->text) ? $paused->content : $response->text;
+        if (blank($content)) {
+            $content = $paused->content;
         }
 
         $now = now();

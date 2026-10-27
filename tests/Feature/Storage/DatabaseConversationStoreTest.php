@@ -547,7 +547,7 @@ test('a bare rejection resume does not persist a blank assistant row', function 
         ->and(DB::table('agent_conversation_messages')->where('role', 'assistant')->count())->toBe(1);
 });
 
-test('a resume folds its steps, text and usage into the paused row', function (): void {
+test('a resume folds its steps, text and usage into the paused row', function (bool $streamed, string $content): void {
     $store = new DatabaseConversationStore;
     $conversationId = $store->storeConversation('user', 1, 'Approval conversation');
 
@@ -569,19 +569,33 @@ test('a resume folds its steps, text and usage into the paused row', function ()
         approvalDecisions: Decisions::from(['call-1' => true]),
     );
 
-    $response = new AgentResponse('invocation-id', 'Done.', new TextUsage(20, 7), new Meta('openai', 'gpt-5'));
-    $response->steps = collect([new Step('Done.', [], [], FinishReason::Stop, new TextUsage(20, 7), new Meta, '', [])]);
+    $step = new Step('Done.', [], [], FinishReason::Stop, new TextUsage(20, 7), new Meta, '', []);
+
+    if ($streamed) {
+        $response = new StreamedAgentResponse('invocation-id', collect([
+            new TextDelta('event-1', 'message-1', 'Done.', 0),
+            new StreamEnd('event-2', 'stop', new TextUsage(20, 7), 0, collect([$step])),
+        ]), new Meta('openai', 'gpt-5'));
+    } else {
+        $response = new AgentResponse('invocation-id', 'Done.', new TextUsage(20, 7), new Meta('openai', 'gpt-5'));
+        $response->steps = collect([$step]);
+    }
 
     $messageId = $store->storeAssistantMessage($conversationId, 'user', 1, $prompt, $response);
 
     $row = DB::table('agent_conversation_messages')->where('role', 'assistant')->sole();
 
     expect($messageId)->toBe('paused-1')
-        ->and($row->content)->toBe("Let me check.\n\nDone.")
+        ->and($row->content)->toBe($content)
         ->and($row->steps)->json()->toHaveCount(2)->{'1'}->content->toBe('Done.')
         ->and($row->usage)->json()->toMatchArray(['input_tokens' => 30, 'output_tokens' => 12])
         ->and($row->meta)->json()->toMatchArray(['provider' => 'openai', 'model' => 'gpt-5']);
-});
+})->with([
+    // A prompted turn stores its final step's text, so its resume does too.
+    'prompted' => [false, 'Done.'],
+    // A streamed turn stores the text of every step, so its resume rebuilds that from the merged steps.
+    'streamed' => [true, "Let me check.\n\nDone."],
+]);
 
 test('a resume keeps the citations the paused half of the turn collected', function (): void {
     $store = new DatabaseConversationStore;
