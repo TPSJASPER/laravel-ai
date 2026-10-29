@@ -31,6 +31,7 @@ use Laravel\Ai\Responses\Data\TextUsage;
 use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\ToolResult;
 use Laravel\Ai\Responses\StreamedAgentResponse;
+use Laravel\Ai\Streaming\Events\TextDelta;
 use Throwable;
 
 class DatabaseConversationStore implements ConversationStore, PaginatesConversations, ResolvesPendingApprovals, VerifiesConversationOwnership
@@ -222,7 +223,7 @@ class DatabaseConversationStore implements ConversationStore, PaginatesConversat
         }
 
         $content = $response instanceof StreamedAgentResponse
-            ? $steps->pluck('content')->filter(fn (string $text): bool => trim($text) !== '')->join("\n\n")
+            ? TextDelta::join($steps->pluck('content'))
             : $response->text;
 
         if (blank($content)) {
